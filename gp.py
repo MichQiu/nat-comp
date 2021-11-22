@@ -2,8 +2,8 @@
 
 import numpy as np
 import math
-import itertools
-import matplotlib.pyplot as plt
+from random import random, randint, seed
+from statistics import mean
 from copy import deepcopy
 
 # sphere function
@@ -187,3 +187,37 @@ for i in range(10):
     x = PSO(w=0.7, a1=2, a2=2, population_size=30, time_steps=5001, search_range=5.12, dim=30,
             func=rastrigin, a3=2, vl=0.5)
     x.run()
+
+
+POP_SIZE        = 60   # population size
+MIN_DEPTH       = 2    # minimal initial random tree depth
+MAX_DEPTH       = 5    # maximal initial random tree depth
+GENERATIONS     = 250  # maximal number of generations to run evolution
+TOURNAMENT_SIZE = 5    # size of tournament for tournament selection
+XO_RATE         = 0.8  # crossover rate
+PROB_MUTATION   = 0.2  # per-node mutation probability
+
+def add(x, y): return x + y
+def sub(x, y): return x - y
+def mul(x, y): return x * y
+def cos(x): return math.cos(x)
+
+FUNCTIONS = [add, sub, mul, cos]
+TERMINALS = ['x1', 'x2', -10, 2, np.pi, 10]
+
+def generate_dataset(target_func): # generate 101 data points from target_func
+    dataset = []
+    input_values = []
+    for x in range(-100,101,2):
+        x /= 19.53125
+        input_values.append(x)
+    rand_ind1 = [randint(0, len(input_values)-1) for i in range(len(input_values))]
+    rand_ind2 = [randint(0, len(input_values)-1) for i in range(len(input_values))]
+    for i in range(0, len(input_values)):
+        x1 = input_values[rand_ind1[i]]
+        x2 = input_values[rand_ind2[i]]
+        dataset.append([np.array(x1, x2), target_func(np.array(x1, x2))])
+    return dataset
+
+
+
