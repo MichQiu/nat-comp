@@ -111,7 +111,6 @@ class PSO:
             for p in range(len(self.swarm)):
                 particle = self.swarm[p]
 
-
                 repulse_terms = []
                 r3 = np.random.uniform(low=0, high=1, size=self.dim)
                 all_other = deepcopy(self.swarm)
@@ -122,20 +121,19 @@ class PSO:
                     repulse_terms.append(x)
                 Z = -sum(repulse_terms)
 
-
                 new_veloctiy =  particle.updateVel(self.w, self.a1, self.a2,
                                                                       particle.best_particle_pos, self.best_swarm_pos,
                                                                       self.a3, Z, repulse=False)
 
+                '''
                 for i in range(len(new_veloctiy)):
                     if new_veloctiy[i] > self.vmax:
                         new_veloctiy[i] = self.vmax
                     elif new_veloctiy[i] < self.vmax:
                         new_veloctiy[i] = self.vmin
-
-
+                '''
                 new_position = particle.position + new_veloctiy
-
+                '''
                 for i in range(len(new_position)):
                     if new_position[i] > self.search_range:
                         new_position[i] = particle.position[i]
@@ -143,14 +141,13 @@ class PSO:
                     elif new_position[i] < -self.search_range:
                         new_position[i] = particle.position[i]
                         new_position[i] = -new_position[i]
-
+                '''
                 if new_position @ new_position > 1.0e+18:  # The search will be terminated if the distance
                     # of any particle from center is too large
                     print('Time:', t, 'Best Pos:', self.best_swarm_pos, 'Best Fit:', self.best_swarm_fitness)
                     raise SystemExit('Most likely divergent: Decrease parameter values')
 
                 self.swarm[p].setPos(new_position)
-
                 new_fitness = self.func(new_position)
 
                 if new_fitness < self.best_swarm_fitness:  # to update the global best both
@@ -168,16 +165,15 @@ class PSO:
                     self.S += 1
                 else:
                     break
-            '''
+
             if npsigntest(self.S, self.p) and self.no_term:
                 print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos,)
                 self.no_term = False
                 #raise SystemExit('Convergence: Termination condition satisfied')
-            '''
+
             if self.best_swarm_fitness == 0:
                 print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos,)
                 break
-
 
             if t % 100 == 0:  # we print only two components even it search space is high-dimensional
                 print("Time: %6d,  Best Fitness: %14.6f,  Best Pos: %9.4f,%9.4f" % (
@@ -187,65 +183,7 @@ class PSO:
                 else:
                     print('')
 
-
-
 for i in range(10):
-    x = PSO(w=0.7, a1=2.02, a2=2.02, population_size=50, time_steps=3001, search_range=5.12, dim=7,
-            func=rastrigin, a3=0.5, vl=0.5)
+    x = PSO(w=0.7, a1=2, a2=2, population_size=30, time_steps=5001, search_range=5.12, dim=30,
+            func=rastrigin, a3=2, vl=0.5)
     x.run()
-
-
-"""
-# Contour plot: With the global minimum showed as "X" on the plot
-x, y = np.array(np.meshgrid(np.linspace(-6, 6,9), np.linspace(-6,6,9)))
-v = np.array([x,y])
-z = rastrigin(v)
-x_min = x.ravel()[z.argmin()]
-y_min = y.ravel()[z.argmin()]
-plt.figure(figsize=(8,8))
-plt.imshow(z, extent=[-6, 6, -6, 6], origin='lower', cmap='viridis', alpha=0.5)
-plt.colorbar()
-plt.plot([x_min], [y_min], marker='x', markersize=5, color="white")
-contours = plt.contour(x, y, z, 10, colors='black', alpha=0.4)
-plt.clabel(contours, inline=True, fontsize=8, fmt="%.0f")
-plt.show()
-
-
-def f(x, y):
-    "Objective function"
-    return (x - 3.14) ** 2 + (y - 2.72) ** 2 + np.sin(3 * x + 1.41) + np.sin(4 * y - 1.73)
-
-# Contour plot: With the global minimum showed as "X" on the plot
-x, y = np.array(np.meshgrid(np.linspace(0, 5, 100), np.linspace(0, 5, 100)))
-z = f(x, y)
-x_min = x.ravel()[z.argmin()]
-y_min = y.ravel()[z.argmin()]
-plt.figure(figsize=(8, 6))
-plt.imshow(z, extent=[0, 5, 0, 5], origin='lower', cmap='viridis', alpha=0.5)
-plt.colorbar()
-plt.plot([x_min], [y_min], marker='x', markersize=5, color="white")
-contours = plt.contour(x, y, z, 10, colors='black', alpha=0.4)
-plt.clabel(contours, inline=True, fontsize=8, fmt="%.0f")
-plt.show()
-n_particles = 20
-X = np.random.rand(2, n_particles) * 5
-V = np.random.randn(2, n_particles) * 0.1
-pbest = X
-pbest_obj = f(X[0], X[1])
-gbest = pbest[:, pbest_obj.argmin()]
-gbest_obj = pbest_obj.min()
-fig, ax = plt.subplots(figsize=(8,6))
-fig.set_tight_layout(True)
-img = ax.imshow(z, extent=[0, 5, 0, 5], origin='lower', cmap='viridis', alpha=0.5)
-fig.colorbar(img, ax=ax)
-ax.plot([x_min], [y_min], marker='x', markersize=5, color="white")
-contours = ax.contour(x, y, z, 10, colors='black', alpha=0.4)
-ax.clabel(contours, inline=True, fontsize=8, fmt="%.0f")
-pbest_plot = ax.scatter(pbest[0], pbest[1], marker='o', color='black', alpha=0.5)
-p_plot = ax.scatter(X[0], X[1], marker='o', color='blue', alpha=0.5)
-p_arrow = ax.quiver(X[0], X[1], V[0], V[1], color='blue', width=0.005, angles='xy', scale_units='xy', scale=1)
-gbest_plot = plt.scatter([gbest[0]], [gbest[1]], marker='*', s=100, color='black', alpha=0.4)
-ax.set_xlim([0,5])
-ax.set_ylim([0,5])
-plt.show()
-"""
