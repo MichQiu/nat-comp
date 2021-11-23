@@ -189,10 +189,10 @@ for i in range(10):
     x.run()
 '''
 
-POP_SIZE        = 60  # population size
+POP_SIZE        = 600  # population size
 MIN_DEPTH       = 2    # minimal initial random tree depth
 MAX_DEPTH       = 8    # maximal initial random tree depth
-GENERATIONS     = 500  # maximal number of generations to run evolution
+GENERATIONS     = 300  # maximal number of generations to run evolution
 TOURNAMENT_SIZE = 7    # size of tournament for tournament selection
 XO_RATE         = 0.8  # crossover rate
 PROB_MUTATION   = 0.2  # per-node mutation probability
@@ -202,6 +202,8 @@ def sub(x, y): return x - y
 def mul(x, y): return x * y
 def cos(x): return math.cos(x)
 
+#FUNCTIONS = [add, mul]
+#TERMINALS = ['x1', 'x2']
 FUNCTIONS = [add, sub, mul, cos]
 TERMINALS = ['x1', 'x2', -10, 2, np.pi, 10]
 
@@ -319,10 +321,25 @@ class GPTree:
 def fitness(individual, dataset): # inverse mean absolute error over dataset normalized to [0,1]
     return 1 / (1 + mean([abs(individual.compute_tree(ds[0], ds[1]) - ds[2]) for ds in dataset]))
 
-def selection(population, fitnesses): # select one individual using tournament selection
-    tournament = [randint(0, len(population)-1) for i in range(TOURNAMENT_SIZE)] # select tournament contenders
-    tournament_fitnesses = [fitnesses[tournament[i]] for i in range(TOURNAMENT_SIZE)]
-    return deepcopy(population[tournament[tournament_fitnesses.index(max(tournament_fitnesses))]])
+def selection(population, fitnesses, double=False, parsimony=1.5): # select one individual using tournament selection
+    if double:
+        winner1 = selection(population, fitnesses, double=False)
+        winner2 = selection(population, fitnesses, double=False)
+        size = [winner1.size(), winner2.size()]
+        if random() > parsimony / 2:
+            if size.index(max(size)) == 0:
+                return winner1
+            elif size.index(max(size)) == 1:
+                return winner2
+        else:
+            if size.index(min(size)) == 0:
+                return winner1
+            elif size.index(min(size)) == 1:
+                return winner2
+    else:
+        tournament = [randint(0, len(population)-1) for i in range(TOURNAMENT_SIZE)] # select tournament contenders
+        tournament_fitnesses = [fitnesses[tournament[i]] for i in range(TOURNAMENT_SIZE)]
+        return deepcopy(population[tournament[tournament_fitnesses.index(max(tournament_fitnesses))]])
 
 def init_population(): # ramped half-and-half
     pop = []
@@ -349,8 +366,8 @@ fitnesses = [fitness(population[i], dataset) for i in range(POP_SIZE)]
 for gen in range(GENERATIONS):
     nextgen_population = []
     for i in range(POP_SIZE):
-        parent1 = selection(population, fitnesses)
-        parent2 = selection(population, fitnesses)
+        parent1 = selection(population, fitnesses, double=True)
+        parent2 = selection(population, fitnesses, double=True)
         parent1.crossover(parent2)
         parent1.mutation()
         nextgen_population.append(parent1)
@@ -369,3 +386,4 @@ print("\n\n_________________________________________________\nEND OF RUN\nbest_o
     best_of_run_gen) + \
       " and has f=" + str(round(best_of_run_f, 3)))
 best_of_run.print_tree()
+
