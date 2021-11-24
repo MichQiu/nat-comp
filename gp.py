@@ -15,7 +15,7 @@ def rastrigin(x):
     return 10*len(x) + sum(np.square(x)-10*np.cos((2*np.pi*x)))
 
 # non-parametric sign test
-def npsigntest(S, p=0.001):
+def npsigntest(S, p=0.0000001):
     ## S (int): the number of zero difference fitnesses counting from the last fitness in sequence
     ## p (float): the error bound probability
     if S > 1:
@@ -74,7 +74,8 @@ class Particle:
 
 class PSO:
 
-    def __init__(self, w, a1, a2, population_size, time_steps, search_range, dim, func, p=0.00001, a3=None, vl=None):
+    def __init__(self, w, a1, a2, population_size, time_steps, search_range, dim, func, repulse=False,
+                 sign_test=False, repeated=50, p=0.00001, a3=None, vl=None):
 
         # Here we use values that are (somewhat) known to be good
         # There are no "best" parameters (No Free Lunch), so try using different ones
@@ -91,6 +92,9 @@ class PSO:
         self.S = 0
         self.vl = vl
         self.search_range = search_range
+        self.repulse = repulse
+        self.sign_test = sign_test
+        self.repeated = repeated
 
         self.vmax = vl*search_range
         self.vmin = vl*(-search_range)
@@ -123,7 +127,7 @@ class PSO:
 
                 new_veloctiy =  particle.updateVel(self.w, self.a1, self.a2,
                                                                       particle.best_particle_pos, self.best_swarm_pos,
-                                                                      self.a3, Z, repulse=False)
+                                                                      self.a3, Z, repulse=self.repulse)
 
                 '''
                 for i in range(len(new_veloctiy)):
@@ -166,14 +170,16 @@ class PSO:
                 else:
                     break
 
-            if npsigntest(self.S, self.p) and self.no_term:
-                print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos,)
-                self.no_term = False
-                #raise SystemExit('Convergence: Termination condition satisfied')
-
-            if self.best_swarm_fitness == 0:
-                print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos,)
-                break
+            if self.sign_test:
+                if npsigntest(self.S, self.p) and self.no_term:
+                    print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos, )
+                    self.no_term = False
+                    # raise SystemExit('Convergence: Termination condition satisfied')
+            else:
+                if self.S == self.repeated and self.no_term:
+                    print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos)
+                    self.no_term = False
+                    # raise SystemExit('Convergence: Termination condition satisfied')
 
             if t % 100 == 0:  # we print only two components even it search space is high-dimensional
                 print("Time: %6d,  Best Fitness: %14.6f,  Best Pos: %9.4f,%9.4f" % (
@@ -185,14 +191,14 @@ class PSO:
 '''
 for i in range(10):
     x = PSO(w=0.7, a1=2, a2=2, population_size=30, time_steps=5001, search_range=5.12, dim=30,
-            func=rastrigin, a3=2, vl=0.5)
+            func=rastrigin, repulse=False, repeated=33, a3=2, vl=0.5)
     x.run()
 '''
 
-POP_SIZE        = 600  # population size
+POP_SIZE        = 70  # population size
 MIN_DEPTH       = 2    # minimal initial random tree depth
 MAX_DEPTH       = 8    # maximal initial random tree depth
-GENERATIONS     = 300  # maximal number of generations to run evolution
+GENERATIONS     = 50  # maximal number of generations to run evolution
 TOURNAMENT_SIZE = 7    # size of tournament for tournament selection
 XO_RATE         = 0.8  # crossover rate
 PROB_MUTATION   = 0.2  # per-node mutation probability
@@ -341,22 +347,33 @@ def selection(population, fitnesses, double=False, parsimony=1.5): # select one 
         tournament_fitnesses = [fitnesses[tournament[i]] for i in range(TOURNAMENT_SIZE)]
         return deepcopy(population[tournament[tournament_fitnesses.index(max(tournament_fitnesses))]])
 
-def init_population(): # ramped half-and-half
+def init_population(min_depth, max_depth, population_size): # ramped half-and-half
     pop = []
-    for md in range(3, MAX_DEPTH + 1):
-        for i in range(int(POP_SIZE/12)):
+    divisor = (max_depth - min_depth)*2
+    for md in range(min_depth + 1, max_depth + 1):
+        for i in range(int(population_size/divisor)):
             t = GPTree()
             t.random_tree(grow = True, max_depth = md) # grow
             pop.append(t)
-        for i in range(int(POP_SIZE/12)):
+        for i in range(int(population_size/divisor)):
             t = GPTree()
             t.random_tree(grow = False, max_depth = md) # full
+            pop.append(t)
+    if len(pop) < population_size:
+        for i in range(int((population_size - len(pop))/2)):
+            md = randint(min_depth, max_depth)
+            t = GPTree()
+            t.random_tree(grow=True, max_depth=md)  # grow
+            pop.append(t)
+            t = GPTree()
+            t.random_tree(grow=False, max_depth=md)  # grow
             pop.append(t)
     return pop
 
 
 dataset = generate_dataset(rastrigin)
-population = init_population()
+'''
+population = init_population(MIN_DEPTH, MAX_DEPTH, POP_SIZE)
 best_of_run = None
 best_of_run_f = 0
 best_of_run_gen = 0
@@ -386,4 +403,141 @@ print("\n\n_________________________________________________\nEND OF RUN\nbest_o
     best_of_run_gen) + \
       " and has f=" + str(round(best_of_run_f, 3)))
 best_of_run.print_tree()
+'''
 
+def roulette_wheel_selection(population, dataset):
+    # Computes the totallity of the population fitness
+    population_fitness = sum([fitness(chromosome, dataset) for chromosome in population])
+
+    # Computes for each chromosome the probability
+    chromosome_probabilities = [fitness(chromosome, dataset) / population_fitness for chromosome in population]
+
+    # Selects one chromosome based on the computed probabilities
+    return np.random.choice(population, p = chromosome_probabilities)
+
+class Particle_GP:
+
+    def __init__(self, parent, dataset):
+        self.position = parent
+        self.new_position = None
+        self.best_particle_pos = self.position
+        self.dataset = dataset
+
+        self.fitness = fitness(self.position, self.dataset)
+        self.best_particle_fitness = self.fitness  # we couldd start with very large number here,
+        # but the actual value is better in case we are lucky
+
+    def setPos(self, pos):
+        self.position = pos
+        self.fitness = fitness(self.position, self.dataset)
+        if self.fitness > self.best_particle_fitness:  # to update the personal best both
+            # position (for velocity update) and
+            # fitness (the new standard) are needed
+            # global best is update on swarm leven
+            self.best_particle_fitness = self.fitness
+            self.best_particle_pos = pos
+
+    def updatePos(self, best_self_pos, best_swarm_pos):
+        pbest = deepcopy(self.position)
+        gbest = deepcopy(self.position)
+        pbest.crossover(best_self_pos)
+        pbest.mutation()
+        gbest.crossover(best_swarm_pos)
+        gbest.mutation()
+        best_self_dif = pbest if fitness(pbest, self.dataset) > self.fitness else self.position
+        best_swarm_dif = gbest if fitness(gbest, self.dataset) > self.fitness else self.position
+        particle_population = [self.position, best_self_dif, best_swarm_dif]
+        new_pos = roulette_wheel_selection(particle_population, self.dataset)
+        self.new_position = new_pos
+        return new_pos
+
+
+class PSO_GP:
+
+    def __init__(self, dataset, min_depth, max_depth, population_size, generations, sign_test=False, repeated=50,
+                 p=0.00001):
+
+        # Here we use values that are (somewhat) known to be good
+        # There are no "best" parameters (No Free Lunch), so try using different ones
+        # There are several papers online which discuss various different tunings of a1 and a2
+        # for different types of problems
+        self.population = init_population(min_depth, max_depth, population_size)
+        self.fitnesses = [fitness(self.population[i], dataset) for i in range(population_size)]
+        self.population_size = population_size
+        self.p = p
+        self.no_term = True
+        self.S = 0
+        self.sign_test = sign_test
+        self.repeated = repeated
+        self.dataset = dataset
+
+        self.swarm = [Particle_GP(selection(self.population, self.fitnesses, double=True), dataset)
+                      for i in range(population_size)]
+        self.generations = generations
+        self.best_of_run_f = 0
+        self.best_of_run_gen = 0
+        self.best_of_run = None
+        print('init')
+
+        # Initialising global best, you can wait until the end of the first time step
+        # but creating a random initial best and fitness which is very high will mean you
+        # do not have to write an if statement for the one off case
+        self.best_swarm_pos = selection(self.population, self.fitnesses, double=True)
+        self.best_swarm_fitness = -1e100
+        self.best_swarm_fitness_record = []
+        self.delta = []
+
+    def run(self):
+        for t in range(self.generations):
+            nextgen_population = []
+            for p in range(len(self.swarm)):
+
+                particle = self.swarm[p]
+                new_position = particle.updatePos(particle.best_particle_pos, self.best_swarm_pos)
+
+                self.swarm[p].setPos(new_position)
+                new_fitness = fitness(new_position, self.dataset)
+
+                if new_fitness > self.best_swarm_fitness:  # to update the global best both
+                    # position (for velocity update) and
+                    # fitness (the new group norm) are needed
+                    self.best_swarm_fitness = new_fitness
+                    self.best_swarm_pos = new_position
+
+                nextgen_population.append(new_position)
+
+            self.delta = [self.best_swarm_fitness - i for i in self.best_swarm_fitness_record]
+            self.best_swarm_fitness_record.append(self.best_swarm_fitness)
+
+            self.S = 0
+            for i in range(len(self.delta) - 1, 0, -1):
+                if self.delta[i] == 0:
+                    self.S += 1
+                else:
+                    break
+            '''
+            if self.sign_test:
+                if npsigntest(self.S, self.p) and self.no_term:
+                    print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos, )
+                    self.no_term = False
+                    # raise SystemExit('Convergence: Termination condition satisfied')
+            else:
+                if self.S == self.repeated and self.no_term:
+                    print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos)
+                    self.no_term = False
+                    # raise SystemExit('Convergence: Termination condition satisfied')
+            '''
+            self.population = nextgen_population
+            self.fitnesses = [fitness(self.population[i], self.dataset) for i in range(self.population_size)]
+
+            if max(self.fitnesses) > self.best_of_run_f:
+                self.best_of_run_f = max(self.fitnesses)
+                self.best_of_run_gen = t
+                self.best_of_run = deepcopy(self.population[self.fitnesses.index(max(self.fitnesses))])
+                print("________________________")
+                print("gen:", t, ", best_of_run_f:", round(max(self.fitnesses), 3), ", best_of_run:")
+                self.best_of_run.print_tree()
+            if self.best_of_run_f == 1: break
+
+y = PSO_GP(dataset, MIN_DEPTH, MAX_DEPTH, POP_SIZE, GENERATIONS)
+y.run()
