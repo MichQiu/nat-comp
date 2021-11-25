@@ -1,10 +1,12 @@
 # GP assignment
 
 import numpy as np
+import pandas as pd
 import math
 from random import random, randint, seed
 from statistics import mean
 from copy import deepcopy
+from collections import defaultdict
 
 # sphere function
 def sphere(x):
@@ -13,22 +15,6 @@ def sphere(x):
 # Rastrigin function
 def rastrigin(x):
     return 10*len(x) + sum(np.square(x)-10*np.cos((2*np.pi*x)))
-
-# non-parametric sign test
-def npsigntest(S, p=0.0000001):
-    ## S (int): the number of zero difference fitnesses counting from the last fitness in sequence
-    ## p (float): the error bound probability
-    if S > 1:
-        cumulative = []
-        for i in range(S - 1, 1, -1):
-            prob = ((math.factorial(S)) / ((math.factorial(i)) * (math.factorial(S - i)))) * (1 / 2) ** S
-            cumulative.append(prob)
-            if sum(cumulative) <= p:
-                return True
-        return False
-    else:
-        return False
-
 
 class Particle:
 
@@ -75,7 +61,7 @@ class Particle:
 class PSO:
 
     def __init__(self, w, a1, a2, population_size, time_steps, search_range, dim, func, repulse=False,
-                 sign_test=False, repeated=50, p=0.00001, a3=None, vl=None):
+                 error_bound=0.0001, repeated=50, p=0.00001, a3=None, print_steps=False):
 
         # Here we use values that are (somewhat) known to be good
         # There are no "best" parameters (No Free Lunch), so try using different ones
@@ -90,16 +76,16 @@ class PSO:
         self.p = p
         self.no_term = True
         self.S = 0
-        self.vl = vl
         self.search_range = search_range
         self.repulse = repulse
-        self.sign_test = sign_test
+        self.error_bound = error_bound
         self.repeated = repeated
-
-        self.vmax = vl*search_range
-        self.vmin = vl*(-search_range)
         self.swarm = [Particle(func, dim, -search_range, search_range) for i in range(population_size)]
         self.time_steps = time_steps
+        self.print_steps = print_steps
+        self.best_swarm_fitness_step = 0
+        self.stopping_fitness = 0
+        self.stopping_fitness_step = 0
         print('init')
 
         # Initialising global best, you can wait until the end of the first time step
@@ -109,47 +95,37 @@ class PSO:
         self.best_swarm_fitness = 1e100
         self.best_swarm_fitness_record = []
         self.delta = []
+        self.delta_all = []
+        self.divergent = False
 
     def run(self):
         for t in range(self.time_steps):
             for p in range(len(self.swarm)):
                 particle = self.swarm[p]
 
-                repulse_terms = []
-                r3 = np.random.uniform(low=0, high=1, size=self.dim)
-                all_other = deepcopy(self.swarm)
-                del all_other[p]
-                for k in all_other:
-                    neighbour = np.subtract(k.position, particle.position)
-                    x = (np.multiply(r3, neighbour))/((np.linalg.norm(neighbour))**2)
-                    repulse_terms.append(x)
-                Z = -sum(repulse_terms)
+                if self.repulse:
+                    repulse_terms = []
+                    r3 = np.random.uniform(low=0, high=1, size=self.dim)
+                    all_other = deepcopy(self.swarm)
+                    del all_other[p]
+                    for k in all_other:
+                        neighbour = np.subtract(k.position, particle.position)
+                        x = (np.multiply(r3, neighbour)) / ((np.linalg.norm(neighbour)) ** 2)
+                        repulse_terms.append(x)
+                    Z = -sum(repulse_terms)
+                else:
+                    Z = None
 
                 new_veloctiy =  particle.updateVel(self.w, self.a1, self.a2,
                                                                       particle.best_particle_pos, self.best_swarm_pos,
                                                                       self.a3, Z, repulse=self.repulse)
 
-                '''
-                for i in range(len(new_veloctiy)):
-                    if new_veloctiy[i] > self.vmax:
-                        new_veloctiy[i] = self.vmax
-                    elif new_veloctiy[i] < self.vmax:
-                        new_veloctiy[i] = self.vmin
-                '''
                 new_position = particle.position + new_veloctiy
-                '''
-                for i in range(len(new_position)):
-                    if new_position[i] > self.search_range:
-                        new_position[i] = particle.position[i]
-                        new_position[i] = -new_position[i]
-                    elif new_position[i] < -self.search_range:
-                        new_position[i] = particle.position[i]
-                        new_position[i] = -new_position[i]
-                '''
+
                 if new_position @ new_position > 1.0e+18:  # The search will be terminated if the distance
                     # of any particle from center is too large
-                    print('Time:', t, 'Best Pos:', self.best_swarm_pos, 'Best Fit:', self.best_swarm_fitness)
-                    raise SystemExit('Most likely divergent: Decrease parameter values')
+                    #print('Time:', t, 'Best Pos:', self.best_swarm_pos, 'Best Fit:', self.best_swarm_fitness)
+                    self.divergent = True
 
                 self.swarm[p].setPos(new_position)
                 new_fitness = self.func(new_position)
@@ -160,45 +136,146 @@ class PSO:
                     self.best_swarm_fitness = new_fitness
                     self.best_swarm_pos = new_position
 
-            self.delta = [self.best_swarm_fitness - i for i in self.best_swarm_fitness_record]
+            self.delta = [abs(self.best_swarm_fitness - i) for i in self.best_swarm_fitness_record]
             self.best_swarm_fitness_record.append(self.best_swarm_fitness)
 
             self.S = 0
             for i in range(len(self.delta) - 1, 0, -1):
-                if self.delta[i] == 0:
+                if self.delta[i] <= self.error_bound:
                     self.S += 1
                 else:
                     break
 
-            if self.sign_test:
-                if npsigntest(self.S, self.p) and self.no_term:
-                    print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos, )
-                    self.no_term = False
-                    # raise SystemExit('Convergence: Termination condition satisfied')
+            if self.S == self.repeated and self.no_term:
+                print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos)
+                self.no_term = False
+                self.stopping_fitness = self.best_swarm_fitness
+                self.stopping_fitness_step = t
+                # raise SystemExit('Convergence: Termination condition satisfied')
+
+            if self.print_steps:
+                if t % 100 == 0:  # we print only two components even it search space is high-dimensional
+                    print("Time: %6d,  Best Fitness: %14.6f,  Best Pos: %9.4f,%9.4f" % (
+                        t, self.best_swarm_fitness, self.best_swarm_pos[0], self.best_swarm_pos[1]), end=" ")
+                    if self.dim > 2:
+                        print('...')
+                    else:
+                        print('')
+
+        self.delta_all = [abs(self.best_swarm_fitness - i) for i in self.best_swarm_fitness_record]
+        self.S = 0
+        for i in range(len(self.delta_all) - 1, 0, -1):
+            if self.delta_all[i] <= self.error_bound:
+                self.S += 1
             else:
-                if self.S == self.repeated and self.no_term:
-                    print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos)
-                    self.no_term = False
-                    # raise SystemExit('Convergence: Termination condition satisfied')
+                break
+        self.best_swarm_fitness_step = self.time_steps - self.S
 
-            if t % 100 == 0:  # we print only two components even it search space is high-dimensional
-                print("Time: %6d,  Best Fitness: %14.6f,  Best Pos: %9.4f,%9.4f" % (
-                t, self.best_swarm_fitness, self.best_swarm_pos[0], self.best_swarm_pos[1]), end=" ")
-                if self.dim > 2:
-                    print('...')
-                else:
-                    print('')
-'''
-for i in range(10):
-    x = PSO(w=0.7, a1=2, a2=2, population_size=30, time_steps=5001, search_range=5.12, dim=30,
-            func=rastrigin, repulse=False, repeated=33, a3=2, vl=0.5)
-    x.run()
-'''
+        if self.divergent:
+            print("Most likely divergent.")
 
-POP_SIZE        = 70  # population size
+
+params = {"w=0.9,a1=a2=1": {"w": 0.9, "a1": 2, "a2": 2, "r": 5},#sphere=5  #rastrigin=None
+          "w=0.7,a1=a2=1.4": {"w": 0.7, "a1": 1.4, "a2": 1.4, "r": 6},#sphere=6  #rastrigin=15
+          "w=0.7,a1=a2=2": {"w": 0.7, "a1": 2, "a2": 2, "r": 30}, #sphere=30  #rastrigin=250
+          "w=0.7,a1=1.6,a2=0.6": {"w": 0.7, "a1": 1.6, "a2": 0.6, "r": 3}, #sphere=3  #rastrigin=250
+          "w=0.5,a1=a2=2": {"w": 0.5, "a1": 2, "a2": 2, "r": 8}, #sphere=8  #rastrigin=100
+          "w=0.3,a1=a2=2": {"w": 0.3, "a1": 2, "a2": 2, "r": 4}, #sphere=4  #rastrigin=100
+          "w=0.1,a1=a2=2": {"w": 0.1, "a1": 2, "a2": 2, "r": 3}}#sphere=3  #rastrigin=100
+
+params = {"w=0.9,a1=a2=1": {"w": 0.9, "a1": 2, "a2": 2, "r": 5},#sphere=5  #rastrigin=None
+          "w=0.7,a1=a2=1.4": {"w": 0.7, "a1": 1.4, "a2": 1.4, "r": 15},#sphere=6  #rastrigin=15
+          "w=0.7,a1=a2=2": {"w": 0.7, "a1": 2, "a2": 2, "r": 250}, #sphere=30  #rastrigin=250
+          "w=0.7,a1=1.6,a2=0.6": {"w": 0.7, "a1": 1.6, "a2": 0.6, "r": 250}, #sphere=3  #rastrigin=250
+          "w=0.5,a1=a2=2": {"w": 0.5, "a1": 2, "a2": 2, "r": 100}, #sphere=8  #rastrigin=100
+          "w=0.3,a1=a2=2": {"w": 0.3, "a1": 2, "a2": 2, "r": 100}, #sphere=4  #rastrigin=100
+          "w=0.1,a1=a2=2": {"w": 0.1, "a1": 2, "a2": 2, "r": 100}}#sphere=3  #rastrigin=100
+
+data = defaultdict(list)
+data_params = defaultdict(list)
+averages = defaultdict(dict)
+results = dict()
+simulations = 30
+for i in params.keys():
+    w = params[i]["w"]
+    a1 = params[i]["a1"]
+    a2 = params[i]["a2"]
+    r = params[i]["r"]
+    print("Parameters: w= " + str(w) + ", a1= " + str(a1) + " ,a2= ", str(a2))
+    print("=================================================================")
+    for j in range(simulations):
+        print("Running simulation " + str(j + 1))
+        print("--------------------------------------------")
+        x = PSO(w=w, a1=a1, a2=a2, population_size=60, time_steps=5001, search_range=5.12, dim=10,
+                func=rastrigin, repulse=True, error_bound=0.0001, repeated=r, a3=2, print_steps=True)
+        x.run()
+        results[j] = {"stopping fitness": x.stopping_fitness,
+                      "best swarm step": x.best_swarm_fitness_step,
+                      "difference in fitness": abs(x.stopping_fitness - x.best_swarm_fitness),
+                      "difference in steps": x.best_swarm_fitness_step - x.stopping_fitness_step,
+                      "best swarm fitnesses": x.best_swarm_fitness_record}
+    averages[i]["difference in fitness"] = np.average([results[k]["difference in fitness"] for k in range(simulations)])
+    averages[i]["difference in steps"] = np.average([results[k]["difference in steps"] for k in range(simulations)])
+    averages[i]["best swarm fitnesses"] = np.average(np.array([results[k]["best swarm fitnesses"]
+                                                               for k in range(simulations)]), axis=0)
+    averages[i]["best swarm step"] = np.average([results[k]["best swarm step"] for k in range(simulations)])
+
+    data[i] = averages[i]["best swarm fitnesses"]
+
+df = pd.DataFrame(data=data)
+df.to_csv("/home/mich_qiu/PycharmProjects/nat-comp/data_1.1_sphere.csv")
+df.to_csv("/home/mich_qiu/PycharmProjects/nat-comp/data_1.1_rastrigin.csv")
+df.to_csv("/home/mich_qiu/PycharmProjects/nat-comp/data_1.3_sphere.csv")
+df.to_csv("/home/mich_qiu/PycharmProjects/nat-comp/data_1.3_rastrigin.csv")
+
+for i in averages.keys():
+    print(str(i) + " (difference in fitness)" + ": " + str(averages[i]["difference in fitness"]))
+    print(str(i) + " (difference in steps)" + ": " + str(averages[i]["difference in steps"]))
+    print(str(i) + " (best swarm step)" + ": " + str(averages[i]["best swarm step"]))
+    print(str(i) + " (best swarm fitness)" + ": " + str(np.average(averages[i]["best swarm fitnesses"])))
+    print(" ")
+
+
+particle_dim = [(30, 5), (30, 10), (30, 20),
+                (60, 5), (60, 10), (60, 20),
+                (90, 5), (90, 10), (90, 20),
+                (120, 5), (120, 10), (120, 20)]
+data = defaultdict(list)
+averages = defaultdict(dict)
+results = dict()
+simulations = 30
+for pd in particle_dim:
+    particle_size = pd[0]
+    dimension = pd[1]
+    for j in range(simulations):
+        print("Running simulation " + str(j + 1))
+        print("--------------------------------------------")
+        x = PSO(w=0.7, a1=2, a2=2, population_size=particle_size, time_steps=8001, search_range=5.12, dim=dimension,
+                func=rastrigin, repulse=False, error_bound=0.0001, repeated=10, a3=2, print_steps=True)
+        x.run()
+        results[j] = {"best swarm step": x.best_swarm_fitness_step,
+                      "best swarm fitnesses": x.best_swarm_fitness_record}
+    averages[pd]["best swarm step"] = np.average([results[k]["best swarm step"] for k in range(simulations)])
+    averages[pd]["best swarm fitnesses"] = np.average(np.array([results[k]["best swarm fitnesses"]
+                                                               for k in range(simulations)]), axis=0)
+
+    data[pd] = averages[pd]["best swarm fitnesses"]
+
+
+df_pd = pd.DataFrame(data=data)
+df_pd.to_csv("/home/mich_qiu/PycharmProjects/nat-comp/data_1.2_sphere.csv")
+df_pd.to_csv("/home/mich_qiu/PycharmProjects/nat-comp/data_1.2_rastrigin.csv")
+
+for i in averages.keys():
+    print(str(i) + " (best swarm step)" + ": " + str(averages[i]["best swarm step"]))
+    print(str(i) + " (best swarm fitness)" + ": " + str(np.average(averages[i]["best swarm fitnesses"])))
+    print(" ")
+
+
+POP_SIZE        = 100  # population size
 MIN_DEPTH       = 2    # minimal initial random tree depth
-MAX_DEPTH       = 8    # maximal initial random tree depth
-GENERATIONS     = 50  # maximal number of generations to run evolution
+MAX_DEPTH       = 7    # maximal initial random tree depth
+GENERATIONS     = 300  # maximal number of generations to run evolution
 TOURNAMENT_SIZE = 7    # size of tournament for tournament selection
 XO_RATE         = 0.8  # crossover rate
 PROB_MUTATION   = 0.2  # per-node mutation probability
@@ -372,38 +449,63 @@ def init_population(min_depth, max_depth, population_size): # ramped half-and-ha
 
 
 dataset = generate_dataset(rastrigin)
-'''
-population = init_population(MIN_DEPTH, MAX_DEPTH, POP_SIZE)
-best_of_run = None
-best_of_run_f = 0
-best_of_run_gen = 0
-fitnesses = [fitness(population[i], dataset) for i in range(POP_SIZE)]
+gp_results = dict()
+gp_sim_data = defaultdict(list)
+gp_data = defaultdict(list)
+no_of_simulations = 1
 
 # go evolution!
-for gen in range(GENERATIONS):
-    nextgen_population = []
-    for i in range(POP_SIZE):
-        parent1 = selection(population, fitnesses, double=True)
-        parent2 = selection(population, fitnesses, double=True)
-        parent1.crossover(parent2)
-        parent1.mutation()
-        nextgen_population.append(parent1)
-    population = nextgen_population
+for sim in range(no_of_simulations):
+    population = init_population(MIN_DEPTH, MAX_DEPTH, POP_SIZE)
+    best_of_run = None
+    best_of_run_f = 0
+    best_of_run_gen = 0
     fitnesses = [fitness(population[i], dataset) for i in range(POP_SIZE)]
-    if max(fitnesses) > best_of_run_f:
-        best_of_run_f = max(fitnesses)
-        best_of_run_gen = gen
-        best_of_run = deepcopy(population[fitnesses.index(max(fitnesses))])
-        print("________________________")
-        print("gen:", gen, ", best_of_run_f:", round(max(fitnesses), 3), ", best_of_run:")
-        best_of_run.print_tree()
-    if best_of_run_f == 1: break
+    for gen in range(GENERATIONS):
+        nextgen_population = []
+        for i in range(POP_SIZE):
+            parent1 = selection(population, fitnesses, double=True)
+            parent2 = selection(population, fitnesses, double=True)
+            parent1.crossover(parent2)
+            parent1.mutation()
+            nextgen_population.append(parent1)
+        population = nextgen_population
+        fitnesses = [fitness(population[i], dataset) for i in range(POP_SIZE)]
+        if max(fitnesses) > best_of_run_f:
+            best_of_run_f = max(fitnesses)
+            best_of_run_gen = gen
+            best_of_run = deepcopy(population[fitnesses.index(max(fitnesses))])
+            #print("________________________")
+            print("gen:", gen, ", best_of_run_f:", round(max(fitnesses), 3), ", best_of_run:")
+            #best_of_run.print_tree()
+        gp_sim_data[sim].append(max(fitnesses))
+        if best_of_run_f == 1: break
+    print("\n\n_________________________________________________\nEND OF RUN\nbest_of_run attained at gen " + str(
+        best_of_run_gen) + \
+          " and has f=" + str(round(best_of_run_f, 3)))
+    best_of_run.print_tree()
 
-print("\n\n_________________________________________________\nEND OF RUN\nbest_of_run attained at gen " + str(
-    best_of_run_gen) + \
-      " and has f=" + str(round(best_of_run_f, 3)))
-best_of_run.print_tree()
-'''
+gp_data["Sphere_gen"] = [len(gp_sim_data[sim]) for sim in range(no_of_simulations)]
+gp_data["Rastrigin_gen"] = [len(gp_sim_data[sim]) for sim in range(no_of_simulations)]
+gp_data["Sphere_max"] = [max(gp_sim_data[sim]) for sim in range(no_of_simulations)]
+gp_data["Rastrigin_max"] = [max(gp_sim_data[sim]) for sim in range(no_of_simulations)]
+gp_data["Sphere_avg"] = np.average(np.array([max(gp_sim_data[sim]) for sim in range(no_of_simulations)]), axis=0)
+gp_data["Rastrigin_avg"] = np.average(np.array([max(gp_sim_data[sim]) for sim in range(no_of_simulations)]), axis=0)
+gp_data["Sphere_process"] = np.average(np.array([gp_sim_data[sim] for sim in range(no_of_simulations)]), axis=0)
+gp_data["Rastrigin_process"] = np.average(np.array([gp_sim_data[sim] for sim in range(no_of_simulations)]), axis=0)
+
+gp_df = pd.DataFrame(data=gp_data)
+gp_df.to_csv("/home/mich_qiu/PycharmProjects/nat-comp/gp_sphere.csv")
+
+
+
+
+gp_results = defaultdict(dict)
+gp_all_gen = dict()
+gp_sim_data = defaultdict(list)
+gp_data = defaultdict(list)
+no_of_simulations = 30
+
 
 def roulette_wheel_selection(population, dataset):
     # Computes the totallity of the population fitness
@@ -515,18 +617,7 @@ class PSO_GP:
                     self.S += 1
                 else:
                     break
-            '''
-            if self.sign_test:
-                if npsigntest(self.S, self.p) and self.no_term:
-                    print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos, )
-                    self.no_term = False
-                    # raise SystemExit('Convergence: Termination condition satisfied')
-            else:
-                if self.S == self.repeated and self.no_term:
-                    print('Time:', t, 'Best Fit:', self.best_swarm_fitness, 'Best Pos:', self.best_swarm_pos)
-                    self.no_term = False
-                    # raise SystemExit('Convergence: Termination condition satisfied')
-            '''
+
             self.population = nextgen_population
             self.fitnesses = [fitness(self.population[i], self.dataset) for i in range(self.population_size)]
 
@@ -534,10 +625,22 @@ class PSO_GP:
                 self.best_of_run_f = max(self.fitnesses)
                 self.best_of_run_gen = t
                 self.best_of_run = deepcopy(self.population[self.fitnesses.index(max(self.fitnesses))])
-                print("________________________")
+                #print("________________________")
                 print("gen:", t, ", best_of_run_f:", round(max(self.fitnesses), 3), ", best_of_run:")
-                self.best_of_run.print_tree()
+                #self.best_of_run.print_tree()
+            gp_all_gen[t] = self.best_swarm_fitness
             if self.best_of_run_f == 1: break
 
-y = PSO_GP(dataset, MIN_DEPTH, MAX_DEPTH, POP_SIZE, GENERATIONS)
-y.run()
+
+for i in range(no_of_simulations):
+    y = PSO_GP(dataset, MIN_DEPTH, MAX_DEPTH, POP_SIZE, GENERATIONS)
+    y.run()
+    gp_results[i] = {"f": y.best_of_run_f, "gen": y.best_of_run_gen}
+    gp_sim_data[i] = [gp_all_gen[j] for j in gp_all_gen.keys()]
+
+gp_data["Sphere_gen"] = [gp_results[i]["gen"] for i in range(no_of_simulations)]
+gp_data["Rastrigin_process"] = np.average(np.array([gp_sim_data[i] for i in range(no_of_simulations)]), axis=0)
+gp_data["Rastrigin_avg"] = np.average(np.array([gp_results[i]["f"] for i in range(no_of_simulations)]))
+
+gp_df = pd.DataFrame(data=gp_data)
+gp_df.to_csv("/home/mich_qiu/PycharmProjects/nat-comp/gppso_rastrigin.csv")
